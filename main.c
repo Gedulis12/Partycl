@@ -1,4 +1,5 @@
 #include <SDL2/SDL_events.h>
+#include <SDL2/SDL_keycode.h>
 #include <SDL2/SDL_mouse.h>
 #include <SDL2/SDL_pixels.h>
 #include <bits/time.h>
@@ -14,8 +15,8 @@
 #define SCREEN_W 1000
 #define SCREEN_H 1000
 #define GRAVITY (9.8f * 100.0f)
-#define COR 0.8f
-#define DAMPING 0.95f
+#define COR 0.9f
+#define DAMPING 0.98f
 
 typedef struct {
     double x, y, radius;
@@ -159,6 +160,11 @@ void draw_stats(SDL_Renderer *r, double dt, int particle_count, TTF_Font *font) 
     SDL_DestroyTexture(text_texture);
 }
 
+uint f_randi(uint index) {
+    index = (index << 13) ^ index;
+    return ((index * (index * index * 15731 + 789221) + 1376312589) & 0x7fffffff);
+}
+
 int main() {
     SDL_Window *window;
     SDL_Renderer *renderer;
@@ -168,7 +174,7 @@ int main() {
         return 1;
     }
 
-    SDL_Color pcol = {255, 0, 0, 255};
+    SDL_Color pcol = {0, 0, 0, 255};
     SDL_Color bg_c = {25, 25, 25, 255};
 
     int mouse_x, mouse_y;
@@ -177,6 +183,7 @@ int main() {
     particles_init(&particles, 512);
 
     bool quit = false;
+    int idx = 0;
     while (!quit)
     {
         SDL_Event e;
@@ -192,10 +199,20 @@ int main() {
             }
         }
 
-        const Uint8 *state = SDL_GetKeyboardState(NULL);
-        if (state[SDL_SCANCODE_SPACE]) {
-            SDL_GetMouseState(&mouse_x, &mouse_y);
+        const uint8_t *keystate = SDL_GetKeyboardState(NULL);
+        if (keystate[SDL_SCANCODE_R])
+        {
+            particles_free(&particles);
+            particles_init(&particles, 512);
+        }
+        if (SDL_GetMouseState(&mouse_x, &mouse_y) & SDL_BUTTON(1)) {
             Particle p;
+            pcol.r = f_randi(idx + 1) % 256;
+            idx ++;
+            pcol.g = f_randi(idx + 2) % 256;
+            idx ++;
+            pcol.b = f_randi(idx + 3) % 256;
+            idx ++;
             particle_init(&p, mouse_x, mouse_y, 5, pcol);
             particles_add(&particles, p);
         }
