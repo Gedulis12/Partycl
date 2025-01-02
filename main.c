@@ -119,29 +119,39 @@ void draw_filled_circle(SDL_Renderer *r, Particle p)
                               (int)(p.x + x_max), (int)(p.y + y));
     }
 }
-void render_particle(SDL_Renderer *r, Particle *p, double dt) {
+
+void handle_bounce(Particle *p)
+{
+    if (p->y + p->radius >= SCREEN_H) {
+        if (fabs(p->velocity) < 0.5 && (SCREEN_H - (p->y + p->radius)) < 1.0) {
+            p->velocity = 0;
+            p->y = SCREEN_H - p->radius;
+        } else {
+            p->y = SCREEN_H - p->radius;
+            p->velocity = -p->velocity * COR;
+            p->velocity *= DAMPING;
+        }
+    }
+}
+
+void apply_gravity(Particle *p, double dt)
+{
     p->accumulated_time += dt;
     const double fixed_dt = 1.0 / 120.0;
 
     while (p->accumulated_time >= fixed_dt) {
         p->velocity += GRAVITY * fixed_dt;
-
         p->y += p->velocity * fixed_dt;
-
-        if (p->y + p->radius >= SCREEN_H) {
-            if (fabs(p->velocity) < 0.5 && (SCREEN_H - (p->y + p->radius)) < 1.0) {
-                p->velocity = 0;
-                p->y = SCREEN_H - p->radius;
-            } else {
-                p->y = SCREEN_H - p->radius;
-                p->velocity = -p->velocity * COR;
-                p->velocity *= DAMPING;
-            }
-        }
-
+        handle_bounce(p);
         p->accumulated_time -= fixed_dt;
     }
+}
 
+
+
+void render_particle(SDL_Renderer *r, Particle *p, double dt)
+{
+    apply_gravity(p, dt);
     draw_filled_circle(r, *p);
 }
 
@@ -195,6 +205,22 @@ int main() {
                 {
                     quit = true;
                     break;
+                }
+                case SDL_KEYDOWN:
+                {
+                    if (e.key.keysym.sym == SDLK_RETURN) {
+                        for (int i = 0; i < 10000; i ++)
+                        {
+                            Particle p;
+                            pcol.r = f_randi(idx + 1) % 256;
+                            idx ++;
+                            pcol.g = f_randi(idx + 2) % 256;
+                            idx ++;
+                            pcol.b = f_randi(idx + 3) % 256;
+                            particle_init(&p, mouse_x, mouse_y, 5, pcol);
+                            particles_add(&particles, p);
+                        }
+                    }
                 }
             }
         }
