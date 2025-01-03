@@ -6,12 +6,15 @@
 
 #define SCREEN_W 1000
 #define SCREEN_H 1000
-#define GRAVITY (9.8f * 200.0f)
-#define COR 0.7f
+
+typedef struct Vec2 {
+    double x, y;
+} Vec2;
 
 typedef struct {
-    double x, y;
-    double prev_x, prev_y;
+    Vec2 current;
+    Vec2 previous;
+    Vec2 acceleration;
     double radius;
     double accumulated_time;
     SDL_Color color;
@@ -24,10 +27,12 @@ typedef struct {
 } Particles;
 
 void particle_init(Particle *p, double x, double y, int radius, SDL_Color color) {
-    p->x = x;
-    p->y = y;
-    p->prev_x = x;
-    p->prev_y = y;
+    p->current.x = x;
+    p->current.y = y;
+    p->previous.x = x;
+    p->previous.y = y;
+    p->acceleration.x = 0;
+    p->acceleration.y = 0;
     p->radius = radius;
     p->color = color;
     p->accumulated_time = 0;
@@ -102,120 +107,183 @@ int setup(SDL_Window **w, SDL_Renderer **r, TTF_Font **f)
     return 0;
 }
 
-void draw_filled_circle(SDL_Renderer *r, Particle p)
+void draw_filled_circle(SDL_Renderer *r, Particle *p)
 {
-    SDL_SetRenderDrawColor(r, p.color.r, p.color.g, p.color.b, p.color.a);
-    for (int y = -p.radius; y <= p.radius; ++y)
+    SDL_SetRenderDrawColor(r, p->color.r, p->color.g, p->color.b, p->color.a);
+    for (int y = -p->radius; y <= p->radius; ++y)
     {
-        int x_max = (int) sqrt((p.radius * p.radius) - (y*y));
-        SDL_RenderDrawLine(r, (int)(p.x - x_max), (int)(p.y + y),
-                              (int)(p.x + x_max), (int)(p.y + y));
+        int x_max = (int) sqrt((p->radius * p->radius) - (y*y));
+        SDL_RenderDrawLine(r, (int)(p->current.x - x_max), (int)(p->current.y + y),
+                              (int)(p->current.x + x_max), (int)(p->current.y + y));
     }
 }
 
-double get_velocity_y(Particle *p) {
-    return (p->y - p->prev_y);
-}
-
-double get_velocity_x(Particle *p) {
-    return (p->x - p->prev_x);
-}
-
-void handle_bounds(Particle *p)
+void update_position(Particle *p, float dt)
 {
-    if (p->y + p->radius >= SCREEN_H) {
+    const Vec2 velocity = {
+        .x = p->current.x - p->previous.x,
+        .y = p->current.y - p->previous.y
+    };
 
-        double vy = get_velocity_y(p);
+    p->previous = p->current;
 
-        if (fabs(vy) < 0.01 && (SCREEN_H - (p->y + p->radius)) < 0.01) {
-            p->y = SCREEN_H - p->radius;
-            p->prev_y = p->y;
-            return;
-        }
-        p->y = SCREEN_H - p->radius;
-        double new_vy = -vy * COR;
-        p->prev_y = p->y - new_vy;
-    }
+    p->current.x = p->current.x + velocity.x + p->acceleration.x * dt * dt;
+    p->current.y = p->current.y + velocity.y + p->acceleration.y * dt * dt;
 
-    if (p->y + p->radius <= 0) {
-        double vy = get_velocity_y(p);
-        p->y = 0 - p->radius;
-        double new_vy = -vy * COR;
-        p->prev_y = p->y - new_vy;
-    }
-    if (p->x + p->radius <= 0) {
-        double vx = get_velocity_x(p);
-        p->x = 0 - p->radius;
-        double new_vx = -vx * COR;
-        p->prev_x = p->x - new_vx;
-    }
-    if (p->x + p->radius >= SCREEN_W) {
-        double vx = get_velocity_x(p);
-        p->x = SCREEN_W - p->radius;
-        double new_vx = -vx * COR;
-        p->prev_x = p->x - new_vx;
-    }
+    p->acceleration.x = 0;
+    p->acceleration.y = 0;
 }
 
-void handle_particle_collision(Particle *p1, Particle *p2) {
-
-    double dx = p2->x - p1->x;
-    double dy = p2->y - p1->y;
-    double dist = sqrt(dx * dx + dy * dy);
-
-
-    double min_dist = p1->radius + p2->radius;
-    if (dist < min_dist) {
-
-        double nx = dx / dist;
-        double ny = dy / dist;
-
-        double overlap = min_dist - dist;
-
-        double move_x = nx * overlap * 0.5;
-        double move_y = ny * overlap * 0.5;
-
-        p1->x -= move_x;
-        p1->y -= move_y;
-        p2->x += move_x;
-        p2->y += move_y;
-    }
+void accelerate(Particle *p, Vec2 acc)
+{
+    p->acceleration.x += acc.x;
+    p->acceleration.y += acc.y;
 }
 
-void handle_all_collisions(Particles *particles) {
-    for (size_t i = 0; i < particles->used; i++) {
-        for (size_t j = i + 1; j < particles->used; j++) {
-            handle_particle_collision(&particles->array[i], &particles->array[j]);
+void apply_gravity(Particle *p)
+{
+    Vec2 gravity = {0.0f, 1000.0f};
+    accelerate(p, gravity);
+}
+
+void add_positive_force(Particles *particles, int x, int y)
+{
+    for (size_t i = 0; i < particles->used; i++)
+    {
+        Particle *p = &particles->array[i];
+        Vec2 disp = {.x = x - p->current.x, .y = y - p->current.y};
+        double dist = sqrt((disp.x*disp.x)+ disp.y+disp.y);
+        if (dist > 0)
+        {
+            double nx = disp.x/dist;
+            double ny = disp.y/dist;
+            p->acceleration.x += p->acceleration.x + nx * 5000.0f;
+            p->acceleration.y += p->acceleration.y + ny * 5000.0f;
         }
     }
 }
 
-void verlet_integration(Particle *p, double dt)
+void add_negative_force(Particles *particles, int x, int y)
 {
-    const double fixed_dt = 1.0/240.0;
-    p->accumulated_time += dt;
-    while (p->accumulated_time >= fixed_dt) {
-        double temp_x = p->x;
-        double temp_y = p->y;
-
-        double dx = (p->x - p->prev_x);
-        double dy = (p->y - p->prev_y);
-
-        p->x = p->x + dx;
-        p->y = p->y + dy + GRAVITY * fixed_dt * fixed_dt;
-
-        p->prev_x = temp_x;
-        p->prev_y = temp_y;
-
-        handle_bounds(p);
-        p->accumulated_time -= fixed_dt;
+    for (size_t i = 0; i < particles->used; i++)
+    {
+        Particle *p = &particles->array[i];
+        Vec2 disp = {.x = x - p->current.x , .y = y - p->current.y};
+        double dist = sqrt((disp.x*disp.x)+ disp.y+disp.y);
+        if (dist > 0)
+        {
+            double nx = disp.x/dist;
+            double ny = disp.y/dist;
+            p->acceleration.x += p->acceleration.x - nx * 10000.0f;
+            p->acceleration.y += p->acceleration.y - ny * 10000.0f;
+        }
     }
 }
 
-void render_particle(SDL_Renderer *r, Particle *p, double dt)
+void apply_constraint(Particle *p)
 {
-    verlet_integration(p, dt);
-    draw_filled_circle(r, *p);
+    const double damp = 0.3f;
+    const Vec2 velocity = {
+        .x = p->current.x - p->previous.x,
+        .y = p->current.y - p->previous.y
+    };
+
+    if (p->current.y + p->radius >= SCREEN_H)
+    {
+        if (velocity.y > 0.01)
+        {
+            p->current.y = SCREEN_H - p->radius;
+            p->previous.y = p->current.y + velocity.y * damp;
+        } else {
+            p->current.y = SCREEN_H - p->radius;
+            p->previous.y = p->current.y;
+        }
+    }
+    if (p->current.y - p->radius <= 0)
+    {
+        p->current.y = 0 + p->radius;
+        p->previous.y = p->current.y + velocity.y * damp;
+    }
+    if (p->current.x + p->radius >= SCREEN_W)
+    {
+        p->current.x = SCREEN_W - p->radius;
+        p->previous.x = p->current.x + velocity.x * damp;
+    }
+    if (p->current.x + p->radius <= 0)
+    {
+        p->current.x = 0 - p->radius;
+        p->previous.x = p->current.x + velocity.x * damp;
+    }
+}
+
+void solve_collision(Particle *a, Particle *b)
+{
+    const Vec2 axis = {
+        .x = a->current.x - b->current.x,
+        .y = a->current.y - b->current.y
+    };
+    double dist = sqrt((axis.x * axis.x) + (axis.y * axis.y));
+    if (dist < a->radius + b->radius)
+    {
+        double nx = axis.x / dist;
+        double ny = axis.y / dist;
+
+        double delta = a->radius + b->radius - dist;
+
+        a->current.x += 0.5f * delta * nx;
+        a->current.y += 0.5f * delta * ny;
+
+        b->current.x -= 0.5f * delta * nx;
+        b->current.y -= 0.5f * delta * ny;
+    }
+}
+
+void solve_collisions(Particles *p)
+{
+    for (size_t i = 0; i < p->used; i++)
+    {
+        for (size_t j = i+1; j < p->used; j++)
+        {
+            solve_collision(&p->array[i], &p->array[j]);
+        }
+    }
+}
+
+void change_color(Particle *p)
+{
+    double velocity_x = p->current.x - p->previous.x;
+    double velocity_y = p->current.y - p->previous.y;
+    double velocity = velocity_x + velocity_y;
+    p->color.r = fabs(velocity*10*255);
+    p->color.g = 0;
+    p->color.b = 0;
+}
+
+void particles_update(Particles *particles, double dt)
+{
+    for (size_t i = 0; i < particles->used; i++)
+    {
+        Particle *p = &particles->array[i];
+        apply_gravity(p);
+        apply_constraint(p);
+        update_position(p, dt);
+    }
+    solve_collisions(particles);
+//    change_color(p);
+}
+
+void render_particles(SDL_Renderer *r, Particles *p, double dt)
+{
+    const int sub_steps = 8;
+    const double sub_dt = dt / (double)sub_steps;
+    for (int i = 0; i < sub_steps; i++)
+    {
+        particles_update(p, sub_dt);
+    }
+    for (size_t i = 0; i < p->used; i++)
+    {
+        draw_filled_circle(r, &p->array[i]);
+    }
 }
 
 void draw_stats(SDL_Renderer *r, double dt, int particle_count, TTF_Font *font) {
@@ -271,14 +339,15 @@ int main() {
                 case SDL_KEYDOWN:
                 {
                     if (e.key.keysym.sym == SDLK_RETURN) {
-                        Particle p;
-                        pcol.r = f_randi(idx + 1) % 256;
-                        idx ++;
-                        pcol.g = f_randi(idx + 2) % 256;
-                        idx ++;
-                        pcol.b = f_randi(idx + 3) % 256;
-                        particle_init(&p, mouse_x, mouse_y, 5, pcol);
-                        particles_add(&particles, p);
+//                        Particle p;
+//                        pcol.r = f_randi(idx + 1) % 256;
+//                        idx ++;
+//                        pcol.g = f_randi(idx + 2) % 256;
+//                        idx ++;
+//                        pcol.b = f_randi(idx + 3) % 256;
+//                        particle_init(&p, mouse_x, mouse_y, 15, pcol);
+//                        particles_add(&particles, p);
+                        //apply_attraction_force(&particles, mouse_x, mouse_y);
                     }
                 }
             }
@@ -290,7 +359,7 @@ int main() {
             particles_free(&particles);
             particles_init(&particles, 512);
         }
-        if (SDL_GetMouseState(&mouse_x, &mouse_y) & SDL_BUTTON(1)) {
+        if (SDL_GetMouseState(&mouse_x, &mouse_y) & SDL_BUTTON(2)) {
             Particle p;
             pcol.r = f_randi(idx + 1) % 256;
             idx ++;
@@ -298,8 +367,16 @@ int main() {
             idx ++;
             pcol.b = f_randi(idx + 3) % 256;
             idx ++;
-            particle_init(&p, mouse_x, mouse_y, 5, pcol);
+            int radius = f_randi(idx) % 20;
+            if (radius < 5) radius = 5;
+            particle_init(&p, mouse_x, mouse_y, radius, pcol);
             particles_add(&particles, p);
+        }
+        if (SDL_GetMouseState(&mouse_x, &mouse_y) & SDL_BUTTON(1)) {
+            add_positive_force(&particles, mouse_x, mouse_y);
+        }
+        if (SDL_GetMouseState(&mouse_x, &mouse_y) & SDL_BUTTON(3)) {
+            add_negative_force(&particles, mouse_x, mouse_y);
         }
 
         Uint32 current_time = SDL_GetTicks();
@@ -309,10 +386,7 @@ int main() {
         SDL_RenderClear(renderer);
         draw_stats(renderer, delta_time, particles.used, font);
 
-        for (size_t i = 0; i < particles.used; i++) {
-            render_particle(renderer, &particles.array[i], delta_time);
-        }
-        handle_all_collisions(&particles);
+        render_particles(renderer, &particles, delta_time);
 
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderDrawLine(renderer, 0, SCREEN_H, SCREEN_W, SCREEN_H);
