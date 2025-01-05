@@ -1,22 +1,25 @@
+#include <SDL2/SDL_render.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <time.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
-#define SCREEN_W 1000
-#define SCREEN_H 1000
+#define SCREEN_W 1600
+#define SCREEN_H 900
+#define MIN_RADIUS 5
+#define MAX_RADIUS 20
 
 typedef struct Vec2 {
-    double x, y;
+    float x, y;
 } Vec2;
 
 typedef struct {
     Vec2 current;
     Vec2 previous;
     Vec2 acceleration;
-    double radius;
-    double accumulated_time;
+    float radius;
     SDL_Color color;
 } Particle;
 
@@ -26,40 +29,109 @@ typedef struct {
     size_t size;
 } Particles;
 
-void particle_init(Particle *p, double x, double y, int radius, SDL_Color color) {
-    p->current.x = x;
-    p->current.y = y;
-    p->previous.x = x;
-    p->previous.y = y;
-    p->acceleration.x = 0;
-    p->acceleration.y = 0;
-    p->radius = radius;
-    p->color = color;
-    p->accumulated_time = 0;
-}
+typedef struct {
+    Vec2 *tiles;
+    int tile_len;
+    int rows, cols;
+} Grid;
 
-void particles_init(Particles *p, size_t size)
+void grid_get_tile_len(Grid *g, int w, int h, int max_radius)
 {
-    p->array = malloc(size * sizeof(Particle));
-    p->used = 0;
-    p->size = size;
-}
-
-void particles_add(Particles *a, Particle p)
-{
-    if (a->used == a->size)
+    int size = max_radius * 2;
+    while ((w % size != 0 || h % size != 0) && (size < w && size < h))
     {
-        a->size *= 2;
-        a->array = realloc(a->array, a->size * sizeof(Particle));
+        size++;
     }
-    a->array[a->used++] = p;
+    g->tile_len = size;
 }
 
-void particles_free(Particles *p)
+Grid* grid_init()
 {
-    free(p->array);
-    p->array = NULL;
-    p->used = p->size = 0;
+    Grid *g = (Grid*)malloc(sizeof(Grid));
+    grid_get_tile_len(g, SCREEN_W, SCREEN_H, MAX_RADIUS);
+    g->cols = (SCREEN_W / g->tile_len);
+    g->rows = (SCREEN_H / g->tile_len);
+    g->tiles = (Vec2*)malloc(sizeof(Vec2) * (g->rows * g->cols));
+    for (int i = 0; i < g->rows; i++)
+    {
+        for (int j = 0; j < g->cols; j++)
+        {
+            int id = i * g->cols + j;
+            g->tiles[id].x = j * g->tile_len;
+            g->tiles[id].y = i * g->tile_len;
+            printf("id: %d, x: %d, y: %d\n", id, j*g->tile_len, i*g->tile_len);
+        }
+    }
+    printf("rows: %d, cols: %d\n", g->rows, g->cols);
+    return g;
+}
+
+int grid_get_id_by_pos(Grid *g, int x, int y)
+{
+    if (x < 0 || x >= SCREEN_W || y < 0 || y >= SCREEN_H) {
+        return -1;
+    }
+
+    int colid = (int)(x / g->tile_len);
+    int rowid = (int)(y / g->tile_len);
+    int id = rowid * g->cols + colid;
+    printf("id: %d, x: %d, y: %d\n", id, x, y);
+    return id;
+}
+
+Vec2 grid_get_surround_start(Grid *g, int id)
+{
+    Vec2 start;
+    if (g->tiles[id].x == 0)
+    {
+        start.x = 0;
+    } else
+    {
+        start.x = g->tiles[id].x - g->tile_len;
+    }
+
+    if (g->tiles[id].y == 0)
+    {
+        start.y = 0;
+    } else
+    {
+        start.y = g->tiles[id].y - g->tile_len;
+    }
+
+    return start;
+}
+
+Vec2 grid_get_surround_end(Grid *g, int id)
+{
+    Vec2 end;
+    int max_x = (g->cols * g->tile_len) - g->tile_len;
+    int max_y = (g->rows * g->tile_len) - g->tile_len;
+
+    if (g->tiles[id].x == max_x)
+    {
+        end.x = max_x;
+    } else
+    {
+        end.x = g->tiles[id].x + g->tile_len;
+    }
+
+    if (g->tiles[id].y == max_y)
+    {
+        end.y = max_y;
+    } else
+    {
+        end.y = g->tiles[id].y + g->tile_len;
+    }
+
+    return end;
+
+}
+
+void grid_free(Grid *g)
+{
+    free(g->tiles);
+    g->tiles = NULL;
+    free(g);
 }
 
 int setup(SDL_Window **w, SDL_Renderer **r, TTF_Font **f)
@@ -107,6 +179,42 @@ int setup(SDL_Window **w, SDL_Renderer **r, TTF_Font **f)
     return 0;
 }
 
+void particle_init(Particle *p, float x, float y, int radius, SDL_Color color) {
+    p->current.x = x;
+    p->current.y = y;
+    p->previous.x = x;
+    p->previous.y = y;
+    p->acceleration.x = 0;
+    p->acceleration.y = 0;
+    p->radius = radius;
+    p->color = color;
+}
+
+void particles_init(Particles *p, size_t size)
+{
+    p->array = malloc(size * sizeof(Particle));
+    p->used = 0;
+    p->size = size;
+}
+
+void particles_add(Particles *a, Particle p)
+{
+    if (a->used == a->size)
+    {
+        a->size *= 2;
+        a->array = realloc(a->array, a->size * sizeof(Particle));
+    }
+    a->array[a->used++] = p;
+}
+
+void particles_free(Particles *p)
+{
+    free(p->array);
+    p->array = NULL;
+    p->used = p->size = 0;
+}
+
+
 void draw_filled_circle(SDL_Renderer *r, Particle *p)
 {
     SDL_SetRenderDrawColor(r, p->color.r, p->color.g, p->color.b, p->color.a);
@@ -115,6 +223,25 @@ void draw_filled_circle(SDL_Renderer *r, Particle *p)
         int x_max = (int) sqrt((p->radius * p->radius) - (y*y));
         SDL_RenderDrawLine(r, (int)(p->current.x - x_max), (int)(p->current.y + y),
                               (int)(p->current.x + x_max), (int)(p->current.y + y));
+    }
+}
+
+void draw_grid_debug(SDL_Renderer *r, Grid *g)
+{
+    if (g == NULL) return;
+
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 0);
+    int x = g->tile_len;
+    int y = g->tile_len;
+    while (x < SCREEN_W)
+    {
+        SDL_RenderDrawLine(r, x, 0, x, SCREEN_H);
+        x += g->tile_len;
+    }
+    while (y < SCREEN_H)
+    {
+        SDL_RenderDrawLine(r, 0, y, SCREEN_W, y);
+        y += g->tile_len;
     }
 }
 
@@ -152,11 +279,11 @@ void add_positive_force(Particles *particles, int x, int y)
     {
         Particle *p = &particles->array[i];
         Vec2 disp = {.x = x - p->current.x, .y = y - p->current.y};
-        double dist = sqrt((disp.x*disp.x)+ disp.y+disp.y);
+        float dist = sqrt((disp.x*disp.x)+ disp.y+disp.y);
         if (dist > 0)
         {
-            double nx = disp.x/dist;
-            double ny = disp.y/dist;
+            float nx = disp.x/dist;
+            float ny = disp.y/dist;
             p->acceleration.x += p->acceleration.x + nx * 5000.0f;
             p->acceleration.y += p->acceleration.y + ny * 5000.0f;
         }
@@ -169,11 +296,11 @@ void add_negative_force(Particles *particles, int x, int y)
     {
         Particle *p = &particles->array[i];
         Vec2 disp = {.x = x - p->current.x , .y = y - p->current.y};
-        double dist = sqrt((disp.x*disp.x)+ disp.y+disp.y);
+        float dist = sqrt((disp.x*disp.x)+ disp.y+disp.y);
         if (dist > 0)
         {
-            double nx = disp.x/dist;
-            double ny = disp.y/dist;
+            float nx = disp.x/dist;
+            float ny = disp.y/dist;
             p->acceleration.x += p->acceleration.x - nx * 10000.0f;
             p->acceleration.y += p->acceleration.y - ny * 10000.0f;
         }
@@ -182,7 +309,7 @@ void add_negative_force(Particles *particles, int x, int y)
 
 void apply_constraint(Particle *p)
 {
-    const double damp = 0.3f;
+    const float damp = 0.3f;
     const Vec2 velocity = {
         .x = p->current.x - p->previous.x,
         .y = p->current.y - p->previous.y
@@ -199,16 +326,19 @@ void apply_constraint(Particle *p)
             p->previous.y = p->current.y;
         }
     }
+
     if (p->current.y - p->radius <= 0)
     {
         p->current.y = 0 + p->radius;
         p->previous.y = p->current.y + velocity.y * damp;
     }
+
     if (p->current.x + p->radius >= SCREEN_W)
     {
         p->current.x = SCREEN_W - p->radius;
         p->previous.x = p->current.x + velocity.x * damp;
     }
+
     if (p->current.x + p->radius <= 0)
     {
         p->current.x = 0 - p->radius;
@@ -222,13 +352,15 @@ void solve_collision(Particle *a, Particle *b)
         .x = a->current.x - b->current.x,
         .y = a->current.y - b->current.y
     };
-    double dist = sqrt((axis.x * axis.x) + (axis.y * axis.y));
+
+    float dist = sqrt((axis.x * axis.x) + (axis.y * axis.y));
+
     if (dist < a->radius + b->radius)
     {
-        double nx = axis.x / dist;
-        double ny = axis.y / dist;
+        float nx = axis.x / dist;
+        float ny = axis.y / dist;
 
-        double delta = a->radius + b->radius - dist;
+        float delta = a->radius + b->radius - dist;
 
         a->current.x += 0.5f * delta * nx;
         a->current.y += 0.5f * delta * ny;
@@ -249,17 +381,39 @@ void solve_collisions(Particles *p)
     }
 }
 
+void solve_collisions_grid(Particles *p, Grid *g)
+{
+    for (size_t i = 0; i < p->used; i++)
+    {
+        int grid_id = grid_get_id_by_pos(g, p->array[i].current.x, p->array[i].current.y);
+        Vec2 start = grid_get_surround_start(g, grid_id);
+        Vec2 end = grid_get_surround_end(g, grid_id);
+
+        for (size_t j = i+1; j < p->used; j++)
+        {
+            Particle *check_with = &p->array[j];
+            Vec2 coord = {.x = check_with->current.x, .y = check_with->current.y};
+
+            if ((coord.x >= start.x && coord.x <= end.x) && (coord.y >= start.y && coord.y <= end.y))
+            {
+                solve_collision(&p->array[i], &p->array[j]);
+            }
+        }
+    }
+
+}
+
 void change_color(Particle *p)
 {
-    double velocity_x = p->current.x - p->previous.x;
-    double velocity_y = p->current.y - p->previous.y;
-    double velocity = velocity_x + velocity_y;
-    p->color.r = fabs(velocity*10*255);
+    float velocity_x = p->current.x - p->previous.x;
+    float velocity_y = p->current.y - p->previous.y;
+    float velocity = velocity_x + velocity_y;
+    p->color.r = fabs(velocity*2*255);
     p->color.g = 0;
     p->color.b = 0;
 }
 
-void particles_update(Particles *particles, double dt)
+void particles_update(Particles *particles, Grid *grid, float dt)
 {
     for (size_t i = 0; i < particles->used; i++)
     {
@@ -267,18 +421,19 @@ void particles_update(Particles *particles, double dt)
         apply_gravity(p);
         apply_constraint(p);
         update_position(p, dt);
+        //change_color(p);
     }
-    solve_collisions(particles);
-//    change_color(p);
+    //solve_collisions(particles);
+    solve_collisions_grid(particles, grid);
 }
 
-void render_particles(SDL_Renderer *r, Particles *p, double dt)
+void render_particles(SDL_Renderer *r, Particles *p, Grid *g, float dt)
 {
     const int sub_steps = 8;
-    const double sub_dt = dt / (double)sub_steps;
+    const float sub_dt = dt / (float)sub_steps;
     for (int i = 0; i < sub_steps; i++)
     {
-        particles_update(p, sub_dt);
+        particles_update(p, g, sub_dt);
     }
     for (size_t i = 0; i < p->used; i++)
     {
@@ -286,10 +441,10 @@ void render_particles(SDL_Renderer *r, Particles *p, double dt)
     }
 }
 
-void draw_stats(SDL_Renderer *r, double dt, int particle_count, TTF_Font *font) {
+void draw_stats(SDL_Renderer *r, float dt, int particle_count, TTF_Font *font) {
     SDL_Color white = {255, 255, 255, 255};
     char stats_text[64];
-    double fps = 1.0f / dt;
+    float fps = 1.0f / dt;
     snprintf(stats_text, sizeof(stats_text), "Particles: %d, FPS: %.2f", particle_count, fps);
 
     SDL_Surface* text_surface = TTF_RenderText_Solid(font, stats_text, white);
@@ -321,6 +476,8 @@ int main() {
     Uint32 last_time = SDL_GetTicks();
     Particles particles;
     particles_init(&particles, 512);
+
+    Grid *grid = grid_init();
 
     bool quit = false;
     int idx = 0;
@@ -367,8 +524,8 @@ int main() {
             idx ++;
             pcol.b = f_randi(idx + 3) % 256;
             idx ++;
-            int radius = f_randi(idx) % 20;
-            if (radius < 5) radius = 5;
+            int radius = f_randi(idx) % MAX_RADIUS;
+            if (radius < MIN_RADIUS) radius = MIN_RADIUS;
             particle_init(&p, mouse_x, mouse_y, radius, pcol);
             particles_add(&particles, p);
         }
@@ -380,19 +537,23 @@ int main() {
         }
 
         Uint32 current_time = SDL_GetTicks();
-        double delta_time = (current_time - last_time) / 1000.0f;
+        float delta_time = (current_time - last_time) / 1000.0f;
         last_time = current_time;
         SDL_SetRenderDrawColor(renderer, bg_c.r, bg_c.g, bg_c.b, bg_c.a);
         SDL_RenderClear(renderer);
         draw_stats(renderer, delta_time, particles.used, font);
 
-        render_particles(renderer, &particles, delta_time);
+        render_particles(renderer, &particles, grid, delta_time);
+        draw_grid_debug(renderer, grid);
 
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
         SDL_RenderDrawLine(renderer, 0, SCREEN_H, SCREEN_W, SCREEN_H);
         SDL_RenderPresent(renderer);
+
     }
 
+    particles_free(&particles);
+    grid_free(grid);
     TTF_CloseFont(font);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);

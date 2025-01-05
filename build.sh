@@ -2,4 +2,4 @@
 
 set -xe
 
-gcc -o main main.c -I/usr/include/SDL2 -lSDL2 -lSDL2_ttf -lm -Wall -Wextra -O3
+gcc -o main main.c -I/usr/include/SDL2 -lSDL2 -lSDL2_ttf -lm -Wall -Wextra -g
