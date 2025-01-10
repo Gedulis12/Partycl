@@ -6,7 +6,6 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include "particle.h"
-#include "grid.h"
 #include "common.h"
 
 int main() {
@@ -30,6 +29,10 @@ int main() {
     Grid *grid = grid_init();
     int idx = 0;
     bool quit = false;
+
+    Particle testp;
+    particle_init(&testp, SCREEN_W/2, SCREEN_H/2, 20, pcol);
+    particles_add(&particles, testp);
 
     while (!quit)
     {
@@ -93,7 +96,7 @@ int main() {
         SDL_RenderClear(renderer);
         draw_stats(renderer, delta_time, particles.used, font);
 
-        particles_render(renderer, &particles, delta_time);
+        particles_render(renderer, &particles, grid, delta_time);
         //grid_debug_draw(renderer, grid);
 
         SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);

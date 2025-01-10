@@ -3,11 +3,12 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 
-#define SCREEN_W 800
-#define SCREEN_H 600
+#define VERLET_SUB_STEPS 8
+#define SCREEN_W 1000
+#define SCREEN_H 800
 
-#define MIN_RADIUS 8
-#define MAX_RADIUS 8
+#define MIN_RADIUS 6
+#define MAX_RADIUS 6
 
 typedef struct Vec2 {
     float x, y;

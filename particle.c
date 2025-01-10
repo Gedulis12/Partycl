@@ -1,4 +1,7 @@
+#include <SDL2/SDL_timer.h>
+#include <stdbool.h>
 #include "particle.h"
+#include "common.h"
 
 void particle_init(Particle *p, float x, float y, int radius, SDL_Color color) {
     p->current.x = x;
@@ -107,7 +110,7 @@ void particle_apply_constraint(Particle *p)
 
     if (p->current.y + p->radius >= SCREEN_H)
     {
-        if (velocity.y > 0.01)
+        if (velocity.y > 0.05)
         {
             p->current.y = SCREEN_H - p->radius;
             p->previous.y = p->current.y + velocity.y * damp;
@@ -117,7 +120,7 @@ void particle_apply_constraint(Particle *p)
         }
     }
 
-    if (p->current.y - p->radius <= 0)
+    if (p->current.y + p->radius <= 0)
     {
         p->current.y = 0 + p->radius;
         p->previous.y = p->current.y + velocity.y * damp;
@@ -138,6 +141,9 @@ void particle_apply_constraint(Particle *p)
 
 void particle_solve_collision(Particle *a, Particle *b)
 {
+    if (!a || !b) return;
+    if (a == b) return;
+
     const Vec2 axis = {
         .x = a->current.x - b->current.x,
         .y = a->current.y - b->current.y
@@ -181,7 +187,7 @@ void particle_colorize_velocity(Particle *p)
     p->color.b = 0;
 }
 
-void particles_update(Particles *particles, float dt)
+void particles_update(Particles *particles, Grid *g, float dt)
 {
     for (size_t i = 0; i < particles->used; i++)
     {
@@ -192,15 +198,18 @@ void particles_update(Particles *particles, float dt)
         //change_color(p);
     }
     particles_solve_collisions(particles);
+    //grid_clean_tiles(g);
+    //grid_populate_tiles(g, particles);
+    //grid_find_collisions(g);
 }
 
-void particles_render(SDL_Renderer *r, Particles *p, float dt)
+void particles_render(SDL_Renderer *r, Particles *p, Grid *g, float dt)
 {
-    const int sub_steps = 8;
+    const int sub_steps = VERLET_SUB_STEPS;
     const float sub_dt = dt / (float)sub_steps;
     for (int i = 0; i < sub_steps; i++)
     {
-        particles_update(p, sub_dt);
+        particles_update(p, g, sub_dt);
     }
     for (size_t i = 0; i < p->used; i++)
     {
@@ -226,4 +235,158 @@ void particles_draw(SDL_Renderer *r, Particles *p)
         particle_draw(r, &p->array[i]);
     }
 
+}
+
+Grid* grid_init()
+{
+    Grid *g = (Grid*)malloc(sizeof(Grid));
+    grid_get_tile_len(g, SCREEN_W, SCREEN_H, MAX_RADIUS);
+    g->cols = (SCREEN_W / g->tile_len);
+    g->rows = (SCREEN_H / g->tile_len);
+    g->tiles = (Tile*)malloc(sizeof(Tile) * (g->rows * g->cols));
+    for (int i = 0; i < g->rows; i++)
+    {
+        for (int j = 0; j < g->cols; j++)
+        {
+            int id = i * g->cols + j;
+
+            g->tiles[id].id = id;
+            g->tiles[id].pos.x = j * g->tile_len;
+            g->tiles[id].pos.y = i * g->tile_len;
+            g->tiles[id].p[0] = (Particle*)malloc(sizeof(Particle) * 8);
+            grid_clean_tiles(g);
+
+            //printf("id: %d, x: %d, y: %d\n", id, j*g->tile_len, i*g->tile_len);
+        }
+    }
+    //printf("rows: %d, cols: %d\n", g->rows, g->cols);
+    return g;
+}
+
+void grid_get_tile_len(Grid *g, int w, int h, int max_radius)
+{
+    int size = max_radius;
+    while ((w % size != 0 || h % size != 0) && (size < w && size < h))
+    {
+        size++;
+    }
+    g->tile_len = size;
+}
+
+Tile* grid_get_tile_by_pos(Grid *g, int x, int y)
+{
+    int id = g->cols * y + x;
+    return &g->tiles[id];
+}
+
+void grid_free(Grid *g)
+{
+    free(g->tiles);
+    g->tiles = NULL;
+    free(g);
+}
+
+void grid_debug_draw(SDL_Renderer *r, Grid *g)
+{
+    if (g == NULL) return;
+
+    SDL_SetRenderDrawColor(r, 255, 255, 255, 0);
+    int x = g->tile_len;
+    int y = g->tile_len;
+    while (x < SCREEN_W)
+    {
+        SDL_RenderDrawLine(r, x, 0, x, SCREEN_H);
+        x += g->tile_len;
+    }
+    while (y < SCREEN_H)
+    {
+        SDL_RenderDrawLine(r, 0, y, SCREEN_W, y);
+        y += g->tile_len;
+    }
+}
+
+void tiles_check_collisions(Tile *t1, Tile *t2)
+{
+    for (int i = 0; i < 8; i++)
+    {
+        for (int j = 0; j < 8; j++)
+        {
+            particle_solve_collision(t1->p[i], t2->p[j]);
+        }
+
+    }
+
+}
+
+void grid_populate_tiles(Grid *g, Particles *p)
+{
+    for (size_t i = 0; i < p->used; i++)
+    {
+        Particle *check = &p->array[i];
+        int x = check->current.x / g->tile_len;
+        int y = check->current.y / g->tile_len;
+
+        Tile *t = grid_get_tile_by_pos(g, (int)x, (int)y);
+        bool assigned = false;
+        int idx = 0;
+
+        while (!assigned)
+        {
+            if (idx > 7)
+            {
+                break;
+            }
+
+            if (t->p[idx] == NULL)
+            {
+                t->p[idx] = check;
+                assigned = true;
+            }
+            idx++;
+        }
+    }
+}
+
+void grid_find_collisions(Grid *g)
+{
+    int start = SDL_GetTicks();
+    for (int x = 0; x < g->cols; x++)
+    {
+        for (int y = 0; y < g->rows; y++)
+        {
+            Tile *t = grid_get_tile_by_pos(g, x, y);
+
+            int dx_min = -1;
+            int dx_max = 1;
+
+            int dy_min = -1;
+            int dy_max = 1;
+
+            if (x == 0) dx_min = 0;
+            if ((int)x == g->cols-1) dx_max = 0;
+
+            if (y == 0) dy_min = 0;
+            if ((int)y == g->rows-1) dy_max = 0;
+
+            for (int dx = dx_min; dx <= dx_max; dx++)
+            {
+                for (int dy = dy_min; dy <= dy_max; dy++)
+                {
+                    Tile *t2 = grid_get_tile_by_pos(g, x + dx, y + dy);
+                    tiles_check_collisions(t, t2);
+                }
+            }
+        }
+    }
+}
+
+void grid_clean_tiles(Grid *g)
+{
+    for (int i = 0; i < g->rows * g->cols; i++)
+    {
+        for (int j = 0; j < 8; j++)
+        {
+            g->tiles[i].p[j] = NULL;
+        }
+    }
 }
